@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Exclude all credential stores and datastore preferences to prevent backup leaks -->
+    <exclude domain="sharedpref" path="." />
+    <exclude domain="file" path="datastore" />
+    <exclude domain="file" path="credentials" />
+    <exclude domain="root" path="." />
+</full-backup-content>

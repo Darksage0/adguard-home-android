@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">AdGuard Home</string>
+    <string name="quick_settings_tile_label">Protection</string>
+</resources>
