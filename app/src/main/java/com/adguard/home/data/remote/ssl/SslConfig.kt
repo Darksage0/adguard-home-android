@@ -3,7 +3,9 @@ package com.adguard.home.data.remote.ssl
 import com.adguard.home.data.local.CredentialStore
 import kotlinx.coroutines.runBlocking
 import java.security.KeyStore
+import java.security.MessageDigest
 import java.security.SecureRandom
+import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
@@ -15,22 +17,15 @@ import javax.net.ssl.X509TrustManager
 
 object SslConfig {
 
-    val permissiveTrustManager: X509TrustManager = object : X509TrustManager {
-        override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-        override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-        override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-    }
-
-    val permissiveSslSocketFactory: SSLSocketFactory = run {
-        val sslContext = SSLContext.getInstance("TLS")
-        sslContext.init(null, arrayOf<TrustManager>(permissiveTrustManager), SecureRandom())
-        sslContext.socketFactory
-    }
-
     private val systemTrustManager: X509TrustManager by lazy {
         val factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
         factory.init(null as KeyStore?)
         factory.trustManagers.filterIsInstance<X509TrustManager>().first()
+    }
+
+    fun sha256Fingerprint(certificate: X509Certificate): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(certificate.encoded)
+        return digest.joinToString(":") { "%02X".format(it) }
     }
 
     /**
@@ -51,6 +46,13 @@ object SslConfig {
      * checkServerTrusted/checkClientTrusted are invoked by OkHttp during the TLS handshake,
      * which for a suspend Retrofit call always happens on a background OkHttp call thread, so
      * the runBlocking read here is safe and does not touch the main thread.
+     *
+     * Trust-on-first-use pinning: enabling "trust self-signed certificate" does not disable
+     * certificate validation outright. Instead the first certificate seen is pinned by its
+     * SHA-256 fingerprint (persisted via CredentialStore), and every later handshake is checked
+     * against that pin. A certificate that doesn't match the pin is rejected -- this bounds the
+     * exposure to "the one certificate this app was first shown" rather than "any certificate
+     * from any attacker who can intercept this connection."
      */
     class DynamicTrustManager(
         private val credentialStore: CredentialStore
@@ -61,12 +63,31 @@ object SslConfig {
         }
 
         override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {
-            val trustSelfSigned = runBlocking { credentialStore.getServerConfig().trustSelfSigned }
-            if (trustSelfSigned) {
-                // User explicitly opted in (default OFF) to trusting this LAN server's certificate.
+            val config = runBlocking { credentialStore.getServerConfig() }
+            if (!config.trustSelfSigned) {
+                systemTrustManager.checkServerTrusted(chain, authType)
                 return
             }
-            systemTrustManager.checkServerTrusted(chain, authType)
+
+            val leaf = chain?.firstOrNull()
+                ?: throw CertificateException("No certificate presented by server")
+            val fingerprint = sha256Fingerprint(leaf)
+            val pinned = config.pinnedCertSha256
+
+            if (pinned == null) {
+                // First connection since the toggle was enabled (or re-enabled): trust and
+                // remember this exact certificate.
+                runBlocking { credentialStore.pinCertificate(fingerprint) }
+                return
+            }
+
+            if (fingerprint != pinned) {
+                throw CertificateException(
+                    "Server certificate changed since it was trusted. Re-enable 'trust " +
+                        "self-signed certificate' in Settings to accept the new certificate."
+                )
+            }
+            // Fingerprint matches the pin -- same certificate this app was already shown.
         }
 
         override fun getAcceptedIssuers(): Array<X509Certificate> = systemTrustManager.acceptedIssuers
@@ -79,10 +100,11 @@ object SslConfig {
     }
 
     /**
-     * Companion hostname verifier for [DynamicTrustManager]: skips hostname verification only
-     * when the live trust-self-signed setting is on (self-signed LAN certs are frequently
-     * issued for an IP or a `.local` name the cert's CN/SAN won't match), otherwise defers to
-     * the platform default verifier.
+     * Companion hostname verifier for [DynamicTrustManager]. When trust-self-signed is on,
+     * [DynamicTrustManager.checkServerTrusted] has already pinned/verified the exact certificate
+     * bytes -- a stronger guarantee than hostname matching, which self-signed LAN certs (issued
+     * for a bare IP or a `.local` name) frequently fail anyway. Otherwise defers to the platform
+     * default verifier.
      */
     fun dynamicHostnameVerifier(credentialStore: CredentialStore): HostnameVerifier {
         val defaultVerifier = HttpsURLConnection.getDefaultHostnameVerifier()

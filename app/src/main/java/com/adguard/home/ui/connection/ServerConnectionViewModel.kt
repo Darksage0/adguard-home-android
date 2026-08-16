@@ -14,6 +14,16 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+// Only allow plaintext HTTP to hosts that are actually LAN-shaped. network_security_config.xml
+// permits cleartext globally because Android's <domain> elements can't express private IP
+// ranges (see the comment in that file) -- this is the app-level guard rail that compensates,
+// so a mistyped or public hostname doesn't send Basic Auth credentials over the open internet.
+private val PRIVATE_HOST_REGEX = Regex(
+    "^(10\\..*|172\\.(1[6-9]|2\\d|3[01])\\..*|192\\.168\\..*|127\\..*|169\\.254\\..*|" +
+        "localhost|.*\\.local|.*\\.lan|.*\\.home)$",
+    RegexOption.IGNORE_CASE
+)
+
 data class ConnectionFormState(
     val protocol: String = "http",
     val host: String = "",
@@ -21,14 +31,15 @@ data class ConnectionFormState(
     val username: String = "",
     val password: String = "",
     val trustSelfSigned: Boolean = false,
-    val requireBiometric: Boolean = false,
     val isTesting: Boolean = false,
     val testResult: ConnectionTestResult? = null,
     val isConfigured: Boolean = false,
     val savedBaseUrl: String = "",
     val savedVersion: String = "",
     val isLockedOut: Boolean = false,
-    val lockoutRemainingSeconds: Int = 0
+    val lockoutRemainingSeconds: Int = 0,
+    val existingPinnedCertSha256: String? = null,
+    val credentialDecryptionFailed: Boolean = false
 ) {
     val resolvedBaseUrl: String
         get() {
@@ -37,11 +48,27 @@ data class ConnectionFormState(
             return if (cleanHost.isBlank()) "http://[HOST]:[PORT]/" else "$protocol://$cleanHost:$cleanPort/"
         }
 
+    val isPlaintextToPublicHost: Boolean
+        get() = protocol == "http" && host.isNotBlank() && !PRIVATE_HOST_REGEX.matches(host.trim())
+
     val isInputValid: Boolean
-        get() = host.isNotBlank() && port.toIntOrNull() in 1..65535 && username.isNotBlank() && password.isNotBlank()
+        get() = host.isNotBlank() && port.toIntOrNull() in 1..65535 &&
+            username.isNotBlank() && password.isNotBlank() && !isPlaintextToPublicHost
 
     val canSave: Boolean
         get() = isInputValid && (testResult?.isSuccess == true || isConfigured)
+
+    // Explicit manual toString to prevent any accidental password leakage into logs (mirrors
+    // ServerConfig.toString(), which this state is a near-duplicate of).
+    override fun toString(): String {
+        return "ConnectionFormState(protocol='$protocol', host='$host', port='$port', " +
+            "username='$username', password=[REDACTED], trustSelfSigned=$trustSelfSigned, " +
+            "isTesting=$isTesting, testResult=$testResult, " +
+            "isConfigured=$isConfigured, savedBaseUrl='$savedBaseUrl', savedVersion='$savedVersion', " +
+            "isLockedOut=$isLockedOut, lockoutRemainingSeconds=$lockoutRemainingSeconds, " +
+            "existingPinnedCertSha256=$existingPinnedCertSha256, " +
+            "credentialDecryptionFailed=$credentialDecryptionFailed)"
+    }
 }
 
 @HiltViewModel
@@ -65,9 +92,10 @@ class ServerConnectionViewModel @Inject constructor(
                         username = if (config.isConfigured) config.username else current.username,
                         password = if (config.isConfigured) config.password else current.password,
                         trustSelfSigned = config.trustSelfSigned,
-                        requireBiometric = config.requireBiometric,
                         isConfigured = config.isConfigured,
-                        savedBaseUrl = config.baseUrl
+                        savedBaseUrl = config.baseUrl,
+                        existingPinnedCertSha256 = config.pinnedCertSha256,
+                        credentialDecryptionFailed = config.credentialDecryptionFailed
                     )
                 }
             }
@@ -130,10 +158,6 @@ class ServerConnectionViewModel @Inject constructor(
         _uiState.update { it.copy(trustSelfSigned = enabled, testResult = null) }
     }
 
-    fun onRequireBiometricChanged(enabled: Boolean) {
-        _uiState.update { it.copy(requireBiometric = enabled) }
-    }
-
     fun testConnection() {
         if (testJob?.isActive == true || _uiState.value.isLockedOut) return
 
@@ -169,6 +193,13 @@ class ServerConnectionViewModel @Inject constructor(
         val state = _uiState.value
         val portInt = state.port.toIntOrNull() ?: 3000
 
+        // Prefer a fingerprint captured by a fresh "Test Connection" just now; otherwise keep
+        // whatever was already pinned, but only if trust-self-signed is still on -- if the user
+        // is saving without retesting, the pin they already have is still the right one to keep,
+        // but if they toggle the setting off, saveServerConfig's own logic must drop the pin.
+        val pinnedCertSha256 = state.testResult?.pinnedCertSha256
+            ?: state.existingPinnedCertSha256.takeIf { state.trustSelfSigned }
+
         viewModelScope.launch {
             repository.saveServerConfig(
                 protocol = state.protocol,
@@ -177,7 +208,7 @@ class ServerConnectionViewModel @Inject constructor(
                 username = state.username,
                 password = state.password,
                 trustSelfSigned = state.trustSelfSigned,
-                requireBiometric = state.requireBiometric
+                pinnedCertSha256 = pinnedCertSha256
             )
             onSuccess()
         }

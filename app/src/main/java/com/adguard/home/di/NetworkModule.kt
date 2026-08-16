@@ -12,10 +12,13 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import kotlinx.serialization.json.Json
 import okhttp3.Interceptor
+import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.RequestBody
 import okhttp3.Response
 import okhttp3.logging.HttpLoggingInterceptor
+import okio.BufferedSink
 import retrofit2.Retrofit
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.util.concurrent.TimeUnit
@@ -50,6 +53,49 @@ class EmptyBodyContentTypeInterceptor : Interceptor {
         } else {
             chain.proceed(originalRequest)
         }
+    }
+}
+
+/**
+ * AdGuard Home's Go backend rejects JSON POST bodies with 415 Unsupported Media Type unless the
+ * Content-Type header is EXACTLY "application/json" -- no charset parameter.
+ *
+ * NetworkModule.provideAdGuardApi builds the kotlinx.serialization Retrofit converter with
+ * `"application/json".toMediaType()` (no charset). OkHttp's own `String.toRequestBody(MediaType)`
+ * -- which that converter calls internally to build each request body -- rewrites any MediaType
+ * with no charset to "<type>; charset=utf-8" for the body it hands back, and that rewritten
+ * MediaType is what OkHttp actually sends as the wire Content-Type header (Retrofit never sets
+ * the header explicitly; it's derived from RequestBody.contentType()). So every JSON POST from
+ * this app -- not just one endpoint -- was silently going out as
+ * "application/json; charset=utf-8" and getting flatly rejected by the server. Strip the charset
+ * back off right before the request is sent.
+ */
+class ExactJsonContentTypeInterceptor : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val originalRequest = chain.request()
+        val originalBody = originalRequest.body ?: return chain.proceed(originalRequest)
+
+        val contentType = originalBody.contentType()
+        val hasJsonCharset = contentType != null &&
+            contentType.type == "application" &&
+            contentType.subtype == "json" &&
+            contentType.charset() != null
+
+        if (!hasJsonCharset) {
+            return chain.proceed(originalRequest)
+        }
+
+        val strippedBody = object : RequestBody() {
+            override fun contentType(): MediaType = "application/json".toMediaType()
+            override fun contentLength(): Long = originalBody.contentLength()
+            override fun writeTo(sink: BufferedSink) = originalBody.writeTo(sink)
+        }
+
+        val strippedRequest = originalRequest.newBuilder()
+            .method(originalRequest.method, strippedBody)
+            .build()
+
+        return chain.proceed(strippedRequest)
     }
 }
 
@@ -97,6 +143,7 @@ object NetworkModule {
                 level = HttpLoggingInterceptor.Level.BASIC
                 redactHeader("Authorization")
                 redactHeader("Cookie")
+                redactHeader("Set-Cookie")
             }
         } else {
             null
@@ -111,6 +158,12 @@ object NetworkModule {
 
     @Provides
     @Singleton
+    fun provideExactJsonContentTypeInterceptor(): ExactJsonContentTypeInterceptor {
+        return ExactJsonContentTypeInterceptor()
+    }
+
+    @Provides
+    @Singleton
     fun provideRefreshEndpointTimeoutInterceptor(): RefreshEndpointTimeoutInterceptor {
         return RefreshEndpointTimeoutInterceptor()
     }
@@ -121,6 +174,7 @@ object NetworkModule {
     fun provideBaseOkHttpClient(
         loggingInterceptor: HttpLoggingInterceptor?,
         emptyBodyInterceptor: EmptyBodyContentTypeInterceptor,
+        exactJsonContentTypeInterceptor: ExactJsonContentTypeInterceptor,
         refreshEndpointTimeoutInterceptor: RefreshEndpointTimeoutInterceptor
     ): OkHttpClient {
         val builder = OkHttpClient.Builder()
@@ -128,6 +182,7 @@ object NetworkModule {
             .readTimeout(10, TimeUnit.SECONDS)
             .writeTimeout(10, TimeUnit.SECONDS)
             .addInterceptor(emptyBodyInterceptor)
+            .addInterceptor(exactJsonContentTypeInterceptor)
             .addInterceptor(refreshEndpointTimeoutInterceptor)
 
         loggingInterceptor?.let {

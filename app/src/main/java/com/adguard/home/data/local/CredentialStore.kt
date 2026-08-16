@@ -30,8 +30,8 @@ class CredentialStore @Inject constructor(
         val USERNAME = stringPreferencesKey("server_username")
         val ENCRYPTED_PASSWORD = stringPreferencesKey("server_encrypted_password")
         val TRUST_SELF_SIGNED = booleanPreferencesKey("trust_self_signed")
-        val REQUIRE_BIOMETRIC = booleanPreferencesKey("require_biometric")
         val IS_CONFIGURED = booleanPreferencesKey("is_configured")
+        val PINNED_CERT_SHA256 = stringPreferencesKey("pinned_cert_sha256")
     }
 
     val serverConfigFlow: Flow<ServerConfig> = dataStore.data
@@ -49,15 +49,17 @@ class CredentialStore @Inject constructor(
             val username = preferences[PreferencesKeys.USERNAME] ?: ""
             val encryptedPassword = preferences[PreferencesKeys.ENCRYPTED_PASSWORD] ?: ""
             val trustSelfSigned = preferences[PreferencesKeys.TRUST_SELF_SIGNED] ?: false
-            val requireBiometric = preferences[PreferencesKeys.REQUIRE_BIOMETRIC] ?: false
             val isConfigured = preferences[PreferencesKeys.IS_CONFIGURED] ?: false
+            val pinnedCertSha256 = preferences[PreferencesKeys.PINNED_CERT_SHA256]
 
+            var decryptionFailed = false
             val decryptedPassword = if (encryptedPassword.isNotBlank()) {
                 try {
                     val cipherBytes = Base64.decode(encryptedPassword, Base64.NO_WRAP)
                     val plainBytes = tinkManager.decrypt(cipherBytes)
                     String(plainBytes, Charsets.UTF_8)
                 } catch (e: Exception) {
+                    decryptionFailed = true
                     ""
                 }
             } else {
@@ -71,8 +73,9 @@ class CredentialStore @Inject constructor(
                 username = username,
                 password = decryptedPassword,
                 trustSelfSigned = trustSelfSigned,
-                requireBiometric = requireBiometric,
-                isConfigured = isConfigured && host.isNotBlank()
+                isConfigured = isConfigured && host.isNotBlank(),
+                pinnedCertSha256 = pinnedCertSha256,
+                credentialDecryptionFailed = decryptionFailed
             )
         }
 
@@ -87,7 +90,7 @@ class CredentialStore @Inject constructor(
         username: String,
         password: String,
         trustSelfSigned: Boolean,
-        requireBiometric: Boolean
+        pinnedCertSha256: String? = null
     ) {
         val cleanHost = host.trim().removePrefix("http://").removePrefix("https://").trimEnd('/')
         val cipherBytes = tinkManager.encrypt(password.toByteArray(Charsets.UTF_8))
@@ -100,15 +103,34 @@ class CredentialStore @Inject constructor(
             preferences[PreferencesKeys.USERNAME] = username.trim()
             preferences[PreferencesKeys.ENCRYPTED_PASSWORD] = encryptedPassword
             preferences[PreferencesKeys.TRUST_SELF_SIGNED] = trustSelfSigned
-            preferences[PreferencesKeys.REQUIRE_BIOMETRIC] = requireBiometric
             preferences[PreferencesKeys.IS_CONFIGURED] = true
+            if (trustSelfSigned && pinnedCertSha256 != null) {
+                preferences[PreferencesKeys.PINNED_CERT_SHA256] = pinnedCertSha256
+            } else {
+                preferences.remove(PreferencesKeys.PINNED_CERT_SHA256)
+            }
         }
     }
 
-    suspend fun updateSecurityPreferences(trustSelfSigned: Boolean, requireBiometric: Boolean) {
+    suspend fun updateSecurityPreferences(trustSelfSigned: Boolean) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.TRUST_SELF_SIGNED] = trustSelfSigned
-            preferences[PreferencesKeys.REQUIRE_BIOMETRIC] = requireBiometric
+            // Disabling the toggle invalidates any pin -- re-enabling later must re-pin fresh
+            // rather than silently trusting whatever certificate happened to be pinned before.
+            if (!trustSelfSigned) {
+                preferences.remove(PreferencesKeys.PINNED_CERT_SHA256)
+            }
+        }
+    }
+
+    /**
+     * Called from [com.adguard.home.data.remote.ssl.SslConfig.DynamicTrustManager] the first time
+     * a certificate is seen after "trust self-signed certificate" is enabled. Trust-on-first-use:
+     * this fingerprint becomes the only certificate accepted for this server going forward.
+     */
+    suspend fun pinCertificate(sha256Fingerprint: String) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.PINNED_CERT_SHA256] = sha256Fingerprint
         }
     }
 

@@ -23,9 +23,9 @@ class SettingsViewModel @Inject constructor(
             initialValue = ServerConfig()
         )
 
-    fun updateSecurityPreferences(trustSelfSigned: Boolean, requireBiometric: Boolean) {
+    fun updateSecurityPreferences(trustSelfSigned: Boolean) {
         viewModelScope.launch {
-            repository.updateSecurityPreferences(trustSelfSigned, requireBiometric)
+            repository.updateSecurityPreferences(trustSelfSigned)
         }
     }
 }

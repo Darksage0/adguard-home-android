@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -106,7 +107,14 @@ fun DashboardScreen(
         }
     }
 
+    // contentWindowInsets = 0: this Scaffold only exists to host the snackbar. It has no topBar
+    // of its own -- the real one lives in MainContainerScreen's outer Scaffold (AppNavigation.kt),
+    // which already consumes the status-bar/display-cutout insets via its own contentPadding.
+    // Material3's Scaffold reserves top inset space by default even without a topBar, so leaving
+    // this at its default double-counted that inset on top of what the outer Scaffold already
+    // applied -- a visible gap between the header and this screen's content.
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
         // Read the state's data once per recomposition into a local. Previously the screen

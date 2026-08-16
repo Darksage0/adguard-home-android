@@ -7,8 +7,12 @@ data class ServerConfig(
     val username: String = "",
     val password: String = "",
     val trustSelfSigned: Boolean = false,
-    val requireBiometric: Boolean = false,
-    val isConfigured: Boolean = false
+    val isConfigured: Boolean = false,
+    val pinnedCertSha256: String? = null,
+    // Transient: true when a saved password exists but couldn't be decrypted (e.g. the Android
+    // Keystore key was invalidated by a biometric re-enrollment). Not persisted itself -- derived
+    // fresh from the encrypted-password/decrypt-failure state on every CredentialStore read.
+    val credentialDecryptionFailed: Boolean = false
 ) {
     val baseUrl: String
         get() {
@@ -18,6 +22,6 @@ data class ServerConfig(
 
     // Explicit manual toString to prevent any accidental password leakage into logs
     override fun toString(): String {
-        return "ServerConfig(protocol='$protocol', host='$host', port=$port, username='$username', password=[REDACTED], trustSelfSigned=$trustSelfSigned, requireBiometric=$requireBiometric, isConfigured=$isConfigured)"
+        return "ServerConfig(protocol='$protocol', host='$host', port=$port, username='$username', password=[REDACTED], trustSelfSigned=$trustSelfSigned, isConfigured=$isConfigured, pinnedCertSha256=$pinnedCertSha256, credentialDecryptionFailed=$credentialDecryptionFailed)"
     }
 }

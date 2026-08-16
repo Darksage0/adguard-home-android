@@ -25,10 +25,13 @@ import java.io.IOException
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.security.cert.CertificateException
+import java.security.cert.X509Certificate
 import javax.inject.Inject
 import javax.inject.Singleton
 import javax.net.ssl.SSLException
 import javax.net.ssl.SSLHandshakeException
+import javax.net.ssl.X509TrustManager
 
 @Singleton
 class ServerSettingsRepository @Inject constructor(
@@ -40,6 +43,27 @@ class ServerSettingsRepository @Inject constructor(
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     val serverConfigFlow: Flow<ServerConfig> = credentialStore.serverConfigFlow
+
+    /**
+     * Used only by [testConnection]: accepts any certificate (there's nothing saved to pin
+     * against yet -- this is the first-contact discovery step) but records the leaf
+     * certificate's fingerprint so it can become the trust-on-first-use pin if the user goes on
+     * to save this connection. Never itself persists anything.
+     */
+    private class CapturingTrustManager : X509TrustManager {
+        var capturedFingerprint: String? = null
+            private set
+
+        override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
+
+        override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {
+            val leaf = chain?.firstOrNull()
+                ?: throw CertificateException("No certificate presented by server")
+            capturedFingerprint = SslConfig.sha256Fingerprint(leaf)
+        }
+
+        override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+    }
 
     suspend fun getServerConfig(): ServerConfig = withContext(ioDispatcher) {
         credentialStore.getServerConfig()
@@ -56,12 +80,14 @@ class ServerSettingsRepository @Inject constructor(
         val cleanHost = host.trim().removePrefix("http://").removePrefix("https://").trimEnd('/')
         val baseUrl = "$protocol://$cleanHost:$port/"
 
+        val capturingTrustManager = CapturingTrustManager()
+
         try {
             val okHttpBuilder = baseOkHttpClient.newBuilder()
             if (trustSelfSigned && protocol.equals("https", ignoreCase = true)) {
                 okHttpBuilder.sslSocketFactory(
-                    SslConfig.permissiveSslSocketFactory,
-                    SslConfig.permissiveTrustManager
+                    SslConfig.dynamicSslSocketFactory(capturingTrustManager),
+                    capturingTrustManager
                 )
                 okHttpBuilder.hostnameVerifier { _, _ -> true }
             }
@@ -102,7 +128,8 @@ class ServerSettingsRepository @Inject constructor(
             ConnectionTestResult(
                 isSuccess = true,
                 serverVersion = status.version,
-                isProtectionEnabled = status.protectionEnabled
+                isProtectionEnabled = status.protectionEnabled,
+                pinnedCertSha256 = capturingTrustManager.capturedFingerprint
             )
         } catch (e: HttpException) {
             when (e.code()) {
@@ -180,7 +207,7 @@ class ServerSettingsRepository @Inject constructor(
         username: String,
         password: String,
         trustSelfSigned: Boolean,
-        requireBiometric: Boolean
+        pinnedCertSha256: String? = null
     ) = withContext(ioDispatcher) {
         credentialStore.saveServerConfig(
             protocol = protocol,
@@ -189,13 +216,13 @@ class ServerSettingsRepository @Inject constructor(
             username = username,
             password = password,
             trustSelfSigned = trustSelfSigned,
-            requireBiometric = requireBiometric
+            pinnedCertSha256 = pinnedCertSha256
         )
     }
 
-    suspend fun updateSecurityPreferences(trustSelfSigned: Boolean, requireBiometric: Boolean) =
+    suspend fun updateSecurityPreferences(trustSelfSigned: Boolean) =
         withContext(ioDispatcher) {
-            credentialStore.updateSecurityPreferences(trustSelfSigned, requireBiometric)
+            credentialStore.updateSecurityPreferences(trustSelfSigned)
         }
 
     suspend fun signOut() = withContext(ioDispatcher) {

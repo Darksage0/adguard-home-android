@@ -17,5 +17,6 @@ data class ConnectionTestResult(
     val serverVersion: String? = null,
     val isProtectionEnabled: Boolean = true,
     val errorType: NetworkErrorType? = null,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val pinnedCertSha256: String? = null
 )

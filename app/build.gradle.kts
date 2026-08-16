@@ -101,7 +101,6 @@ dependencies {
     // Storage & Security
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.tink.android)
-    implementation(libs.androidx.biometric)
 
     // Background & Glance AppWidget
     implementation(libs.androidx.work.runtime.ktx)

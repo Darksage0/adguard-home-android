@@ -116,6 +116,39 @@ fun ServerConnectionScreen(
         ) {
             Spacer(modifier = Modifier.height(8.dp))
 
+            // Notice when the saved password couldn't be decrypted (e.g. device security was
+            // reset, invalidating the Android Keystore key it was encrypted under) -- without
+            // this the user just sees a silently-blank password field with no explanation.
+            if (state.credentialDecryptionFailed) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Your saved password couldn't be read (device security was " +
+                                "reset) — please re-enter it.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
             // Configured Status banner if already connected
             if (state.isConfigured && !isFirstLaunch) {
                 Card(
@@ -194,6 +227,24 @@ fun ServerConnectionScreen(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
             )
+
+            if (state.isPlaintextToPublicHost) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Plain HTTP should only be used on your local network.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -306,7 +357,9 @@ fun ServerConnectionScreen(
                                 fontWeight = FontWeight.Medium
                             )
                             Text(
-                                text = "Allow connection to HTTPS servers using custom LAN certs",
+                                text = "The first certificate seen after enabling this is trusted " +
+                                    "and remembered. If it ever changes unexpectedly, connections " +
+                                    "will be blocked until you re-enable this.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
