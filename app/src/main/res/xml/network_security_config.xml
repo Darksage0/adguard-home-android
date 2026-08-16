@@ -3,10 +3,20 @@
     Trade-off explanation:
     AdGuard Home commonly runs on self-hosted local LAN nodes (e.g. Raspberry Pi) accessed
     directly via local IPv4/IPv6 addresses (192.168.x.x, 10.x.x.x) or mDNS hostnames (*.local).
-    Android NetworkSecurityConfig <domain> elements only match exact hostnames/subdomains
-    and do not natively support IP CIDR mask notation (like 192.168.0.0/16).
-    Therefore, base-config permits cleartext traffic for LAN HTTP connections while
-    ensuring standard system/user certificate trust anchors.
+    Android NetworkSecurityConfig <domain> elements only match exact hostnames/subdomains and
+    cannot express IP CIDR ranges (e.g. 192.168.0.0/16), so there is no way to scope cleartext
+    permission to "private IPs only" via this file; base-config permits cleartext globally as
+    the only mechanism that actually supports connecting to an arbitrary LAN IP literal, while
+    still requiring standard system/user certificate trust anchors for any HTTPS connection.
+
+    A previous version of this file also declared a domain-config element scoping cleartext to
+    "local"/"lan"/"home"/"localhost". That block was inert (base-config already permits
+    cleartext for every domain, so nothing ever fell through to it) and made the file look more
+    restrictive than it actually is. Removed rather than left as misleading decoration.
+
+    The real mitigation for sending credentials in the clear to a non-LAN host lives in the app
+    itself: ConnectionFormState.isPlaintextToPublicHost blocks Test/Save when the protocol is
+    HTTP and the host isn't private-IP/mDNS-shaped (see ServerConnectionViewModel.kt).
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">
@@ -15,12 +25,4 @@
             <certificates src="user" />
         </trust-anchors>
     </base-config>
-
-    <!-- Specific local and mDNS domain scopes -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">local</domain>
-        <domain includeSubdomains="true">lan</domain>
-        <domain includeSubdomains="true">home</domain>
-        <domain includeSubdomains="true">localhost</domain>
-    </domain-config>
 </network-security-config>

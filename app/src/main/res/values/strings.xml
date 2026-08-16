@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">AdGuard Home</string>
+    <string name="app_name">Ad Home Guard Remote Client</string>
     <string name="quick_settings_tile_label">Protection</string>
 </resources>

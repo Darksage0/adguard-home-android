@@ -5,18 +5,18 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class StatsDto(
-    @SerialName("num_dns_queries") val numDnsQueries: Long = 0,
-    @SerialName("num_blocked_filtering") val numBlockedFiltering: Long = 0,
-    @SerialName("num_replaced_safebrowsing") val numReplacedSafebrowsing: Long = 0,
-    @SerialName("num_replaced_safesearch") val numReplacedSafesearch: Long = 0,
-    @SerialName("num_replaced_parental") val numReplacedParental: Long = 0,
+    @SerialName("num_dns_queries") @Serializable(with = LenientLongSerializer::class) val numDnsQueries: Long = 0,
+    @SerialName("num_blocked_filtering") @Serializable(with = LenientLongSerializer::class) val numBlockedFiltering: Long = 0,
+    @SerialName("num_replaced_safebrowsing") @Serializable(with = LenientLongSerializer::class) val numReplacedSafebrowsing: Long = 0,
+    @SerialName("num_replaced_safesearch") @Serializable(with = LenientLongSerializer::class) val numReplacedSafesearch: Long = 0,
+    @SerialName("num_replaced_parental") @Serializable(with = LenientLongSerializer::class) val numReplacedParental: Long = 0,
     @SerialName("avg_processing_time") val avgProcessingTime: Double = 0.0,
     @SerialName("time_units") val timeUnits: String = "hours",
 
-    @SerialName("dns_queries") val dnsQueries: List<Long> = emptyList(),
-    @SerialName("blocked_filtering") val blockedFiltering: List<Long> = emptyList(),
-    @SerialName("replaced_safebrowsing") val replacedSafebrowsing: List<Long> = emptyList(),
-    @SerialName("replaced_parental") val replacedParental: List<Long> = emptyList(),
+    @SerialName("dns_queries") @Serializable(with = LenientLongListSerializer::class) val dnsQueries: List<Long> = emptyList(),
+    @SerialName("blocked_filtering") @Serializable(with = LenientLongListSerializer::class) val blockedFiltering: List<Long> = emptyList(),
+    @SerialName("replaced_safebrowsing") @Serializable(with = LenientLongListSerializer::class) val replacedSafebrowsing: List<Long> = emptyList(),
+    @SerialName("replaced_parental") @Serializable(with = LenientLongListSerializer::class) val replacedParental: List<Long> = emptyList(),
 
     @SerialName("top_queried_domains") val topQueriedDomains: List<TopEntryDto> = emptyList(),
     @SerialName("top_clients") val topClients: List<TopEntryDto> = emptyList(),

@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AdGuard Home"
+rootProject.name = "Ad Home Guard Remote Client"
 include(":app")

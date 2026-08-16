@@ -19,3 +19,5 @@ local.properties
 
 /_to_delete/
 
+.vscode/
+

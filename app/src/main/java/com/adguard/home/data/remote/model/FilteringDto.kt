@@ -15,9 +15,9 @@ data class FilteringStatusDto(
 @Serializable
 data class FilterDto(
     @SerialName("enabled") val enabled: Boolean = false,
-    @SerialName("id") val id: Long = 0,
+    @SerialName("id") @Serializable(with = LenientLongSerializer::class) val id: Long = 0,
     @SerialName("name") val name: String = "",
-    @SerialName("rules_count") val rulesCount: Long = 0,
+    @SerialName("rules_count") @Serializable(with = LenientLongSerializer::class) val rulesCount: Long = 0,
     @SerialName("url") val url: String = "",
     @SerialName("last_updated") val lastUpdated: String? = null
 )

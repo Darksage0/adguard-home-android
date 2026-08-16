@@ -41,6 +41,6 @@ data class QuestionDto(
 
 @Serializable
 data class QueryRuleDto(
-    @SerialName("filter_list_id") val filterListId: Long = 0,
+    @SerialName("filter_list_id") @Serializable(with = LenientLongSerializer::class) val filterListId: Long = 0,
     @SerialName("text") val text: String = ""
 )
